@@ -179,3 +179,44 @@ Note the first attention in the decoder uses Masked multi head attention to prev
 > Architecture: Skeleton of model, no weights, only layers and operations
 
 Model could mean either.
+
+# 5. Encoder models
+These only use the encoder of a transformer model. At each stage of the encoder, the attention layers can access all words in the initial sentence. Called auto-encoding models.
+
+Pretraining such models involves currupting a given sentence (Add a mask) and adding the task of guessing it. Best suited for text understanding like classification and NER problems as well as Masked Language Modeling (MLM)
+
+## How does it work?
+Encoder is passed in words as input and for each word, a numerical representation is output that represents the word. The output depends on other words as well.
+> The numeric output can be called a feature __vector__ or feature __tensor__
+
+Each word has one vector. The dimension of the vector is dependent on the architecture of the model used. For BERT this was 768. Each word in the initial sequence affects a word's representation. This is done with the __self-attention__ mechanism. Note that bi-directional here means both left and right context of the words. 
+
+# 6. Decoder models
+These use only the decoder of the transformer. Called auto-regressive models.
+
+Pretraining such models revolves around predicting the next word in the sentence.
+
+## How does it work?
+Similar to encoder, we pass a set of words and get a numeric representation as output. Difference with encoder is with self-attention for the first layer. Here it uses only the words on the left to predict. This is known as __masked self attention__. The right context is masked while the left is visible. This makes them have unidirectional context. The additional attention layers may or may not be unidirectional but generally are unidirectional.
+
+These use causal language modeling aking them good at generating words. The word with highest probability score is picked as the next word. 
+
+> Context size, tells you how long the context you generate can be. GPT-2 has length 1024 meaning upto 1024 words can be generated and the decoder would still have "some" memory of the first word.
+
+# 7. Sequence to sequence models
+These use both parts of the Transformer architecture. Also known as encoder-decoder models. Again, the attention layers of the encoder can access all the input while the decoder can only access words positioned before a given words in the input.
+
+Best suited to generate new sentences based on a given input such as summarization, translation and generative QA.
+
+## How does it work?
+Numerical info of encoder and decoder have meaning that they store. Unlike plain encoders, in seq-seq models, the output of the encoder is passed directly to the decoder along with a start of sequence word as input. The decoder uses these two inputs to generate a word as output.
+
+For the next word, we no longer need the encoder itself, just its numeric output from earlier (so once the output is generated for that input, encoder is sit idle). This is combined with input from `start of sequence word` + Word_1 which is the first output of the decoder to create Word_2.
+> This makes the decoder auto-regressive - the output of the decoder is fed back as input. 
+
+Keep doing this till decoder creates a stopping value like `.` or we hit `max length` or something on those lines.
+
+Note: The encoder and decoder do not share weights. So encoder can be trained to understand the sequence and extract relevant information. For translation this is like parsing the input and placing it as a vector. The goal of the encoder is to decode this numerical output from the encoder and use it to generate words. This means, the decoder could output 4 words when encoder has only 3 as its input, different sized input and output. We can mix and match the encoder and decoder models.
+
+# 8. Bias and Limitations
+The original data being used has bias based on where its procured from. This could affect results.
