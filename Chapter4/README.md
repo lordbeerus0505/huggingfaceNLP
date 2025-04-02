@@ -76,3 +76,6 @@ Nothing too technical to be explained.
 
 ## Using the web interface
 Read from [here](https://huggingface.co/learn/nlp-course/chapter4/3?fw=pt#using-the-huggingfacehub-python-library)
+
+# 4.4 Building a model card
+Nothing worth noting.
