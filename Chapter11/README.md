@@ -236,3 +236,148 @@ tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=model_na
 Since this uses a dataset with "messages" field, auto converts to ChatML format.
 
 ## Packing the dataset
+SFT trainer allows multiple examples to be packed into the same input sequence. Requires setting `packing=True` in the constructor. Can disable packing for evaluation datasets with `eval_packing=False`.
+```py
+# Configure packing
+training_args = SFTConfig(packing=True)
+
+trainer = SFTTrainer(model=model, train_dataset=dataset, args=training_args)
+
+trainer.train()
+```
+Can use a custom format function to combine fields into a single input sequence.
+```py
+def formatting_func(example):
+    text = f"### Question: {example['question']}\n ### Answer: {example['answer']}"
+    return text
+
+
+training_args = SFTConfig(packing=True)
+trainer = SFTTrainer(
+    "facebook/opt-350m",
+    train_dataset=dataset,
+    args=training_args,
+    formatting_func=formatting_func,
+)
+```
+
+## Monitoring Training Progress
+
+### Understanding Loss Patterns
+3 distinct phases:
+1. Initial Sharp Drop - rapid adaptation to the new distribution
+2. Gradual Stabilization - Learning rate slows down as module fine tunes
+3. Convergence - Loss stabilizes indicating training conclusion
+
+
+### Metrics to monitor
+Training loss, Validation loss, Learning rate progression, Gradient norms
+
+## The path to convergence
+Loss curve should gradually stabilize. Key indicator of training is small gap between training and validation loss implying model is learning to generalize as opposed to memorize.
+See the graphs [here](https://huggingface.co/learn/llm-course/chapter11/3?fw=pt#monitoring-training-progress)
+
+# 11.4 LoRA (Low-Rank Adaptation)
+
+LoRA allows the fine tuning of LLMs with a small number of parameters. Reduces trainable parameters by 90% by adding and optimizing smaller matrices.
+
+## Understand LoRA
+Technique freezes pre-trained (base) model weights and injects trainable rank decomposition matrices into the model's layers. 
+>LoRA decomposes the weight updates into smaller matrices through low-rank decomposition, significantly reducing the number of trainable parameters while maintaining model performance
+
+Advantages of LoRA:
+1. Memory Efficiency: 
+    * Only adapter params stored in GPU memory
+    * Base model weights are frozen - can load in lower precision
+    * Fine tuning of large models on consumer GPUs
+
+2. Training Features:
+    * Native PEFT/LoRA integration with min setup
+    * QLoRA has even better efficiency (quantized lora)
+
+3. Adapter Management:
+    * Adapter weight saving during checkpoints
+    * Features to merge adapters into base models
+
+## Loading LoRA with PEFT library
+Parameter efficient fine tuning is a library by Hugging Face that allows you to easily add LoRA support. 
+Can load adapaters onto pretrained models with `load_adaptor()`
+
+```py
+from peft import PeftModel, PeftConfig
+
+config = PeftConfig.from_pretrained("ybelkada/opt-350m-lora")
+model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
+lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora")
+```
+
+## Fine-tune LLM using trl and the SFTTrainer with LoRA
+We can link SFTTrainer with LoRA using the LoRA Config from PeftConfig above. 
+
+### LoRA configuration 
+Key parameters are `rank` (r) - dimension of low-rank matrices used for weight updates. Typically between 4-32. `lora_alpha` scaling factor for LoRA layers ususally set to 2x rank value. `lora_dropout` - dropout probability for LoRA layers, typically 0.05 to 0.1. `bias` - controls bias terms like “none”, “all”, or “lora_only”. `target_modules` specifies which modules to apply LoRA to. Can be "all-linear" or specific.
+
+### Using TRL with PEFT
+```py
+from peft import LoraConfig
+
+# TODO: Configure LoRA parameters
+# r: rank dimension for LoRA update matrices (smaller = more compression)
+rank_dimension = 6
+# lora_alpha: scaling factor for LoRA layers (higher = stronger adaptation)
+lora_alpha = 8
+# lora_dropout: dropout probability for LoRA layers (helps prevent overfitting)
+lora_dropout = 0.05
+
+peft_config = LoraConfig(
+    r=rank_dimension,  # Rank dimension - typically between 4-32
+    lora_alpha=lora_alpha,  # LoRA scaling factor - typically 2x rank
+    lora_dropout=lora_dropout,  # Dropout probability for LoRA layers
+    bias="none",  # Bias type for LoRA. the corresponding biases will be updated during training.
+    target_modules="all-linear",  # Which modules to apply LoRA to
+    task_type="CAUSAL_LM",  # Task type for model architecture
+)
+
+# Create SFTTrainer with LoRA configuration
+trainer = SFTTrainer(
+    model=model,
+    args=args,
+    train_dataset=dataset["train"],
+    peft_config=peft_config,  # LoRA configuration
+    max_seq_length=max_seq_length,  # Maximum sequence length
+    processing_class=tokenizer,
+)
+```
+
+## Merging LoRA Adapters
+You might want to merge the adapter weights back into the base model for easier after training with LoRA. 
+
+>The merging process requires attention to memory management and precision. Since you’ll need to load both the base model and adapter weights simultaneously, ensure sufficient GPU/CPU memory is available. Using device_map="auto" in transformers will find the correct device for the model based on your hardware.
+
+```py
+import torch
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+# 1. Load the base model
+base_model = AutoModelForCausalLM.from_pretrained(
+    "base_model_name", torch_dtype=torch.float16, device_map="auto"
+)
+
+# 2. Load the PEFT model with adapter
+peft_model = PeftModel.from_pretrained(
+    base_model, "path/to/adapter", torch_dtype=torch.float16
+)
+
+# 3. Merge adapter weights with base model
+merged_model = peft_model.merge_and_unload()
+
+# If there are issues
+# Save both model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("base_model_name")
+merged_model.save_pretrained("path/to/save/merged_model")
+tokenizer.save_pretrained("path/to/save/merged_model")
+```
+
+# 11.5 Evaluation
+Basic theory - read from [here](https://huggingface.co/learn/llm-course/chapter11/5?fw=pt#evaluation)
